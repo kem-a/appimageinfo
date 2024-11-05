@@ -47,4 +47,4 @@ Number of xattr ids 0
 
 ## Licence
 
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License. See the [LICENSE](https://github.com/kem-a/appimageinfo?tab=MIT-1-ov-file) file for details.

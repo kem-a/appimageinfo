@@ -2,6 +2,7 @@
 
 A simple Bash script to analyze AppImage files and extract filesystem information.
 
+
 ## Usage
 
 To use this script, you need to provide an AppImage file as an argument.
@@ -9,6 +10,7 @@ To use this script, you need to provide an AppImage file as an argument.
 ```sh
 ./appimageinfo <appimage-file>
 ```
+
 
 ## Output Example
 
@@ -36,3 +38,13 @@ Number of ids 1
 Number of xattr ids 0
 
 ```
+
+
+## Dependencies
+
+* unsquashfs (squashfs-tools)
+
+
+## Licence
+
+This project is licensed under the MIT License. See the LICENSE file for details.

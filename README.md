@@ -5,7 +5,7 @@ A simple Bash script to analyze AppImage files and extract filesystem informatio
 
 ## Usage
 
-To use this script, you need to provide an AppImage file as an argument.
+To use this script, you need to provide an AppImage file as an argument. AppImage file must be executable.
 
 ```sh
 ./appimageinfo <appimage-file>

@@ -23,7 +23,7 @@ fi
 echo "Analyzing AppImage: $APPIMAGE_FILE"
 
 # Get the offset of the SquashFS filesystem
-OFFSET=$(./"$APPIMAGE_FILE" --appimage-offset)
+OFFSET=$("$APPIMAGE_FILE" --appimage-offset)
 
 # Check if offset was obtained successfully
 if [ -z "$OFFSET" ]; then

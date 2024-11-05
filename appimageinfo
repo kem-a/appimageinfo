@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Check if an AppImage file is provided
+if [ -z "$1" ]; then
+    echo "Usage: $0 <appimage-file>"
+    exit 1
+fi
+
+APPIMAGE_FILE="$1"
+
+# Check if the file exists
+if [ ! -f "$APPIMAGE_FILE" ]; then
+    echo "Error: File '$APPIMAGE_FILE' not found!"
+    exit 1
+fi
+
+# Check if file is executable
+if [ ! -x "$APPIMAGE_FILE" ]; then
+    echo "Error: File '$APPIMAGE_FILE' is not executable!"
+    exit 1
+fi
+
+echo "Analyzing AppImage: $APPIMAGE_FILE"
+
+# Get the offset of the SquashFS filesystem
+OFFSET=$(./"$APPIMAGE_FILE" --appimage-offset)
+
+# Check if offset was obtained successfully
+if [ -z "$OFFSET" ]; then
+    echo "Error: Unable to determine SquashFS offset. Make sure the file is a valid AppImage."
+    exit 1
+fi
+
+echo "SquashFS offset: $OFFSET"
+echo "----------------------------------------"
+
+# Use unsquashfs to show filesystem info, redirecting stderr to stdout and filtering output
+unsquashfs -o "$OFFSET" -stat "$APPIMAGE_FILE" 2>&1 | grep -v "Parallel unsquashfs"

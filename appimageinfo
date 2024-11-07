@@ -8,6 +8,11 @@ fi
 
 APPIMAGE_FILE="$1"
 
+# Add './' prefix if the file is in the current directory and does not already start with './'
+if [[ "$APPIMAGE_FILE" != /* && "$APPIMAGE_FILE" != ./* ]]; then
+    APPIMAGE_FILE="./$APPIMAGE_FILE"
+fi
+
 # Check if the file exists
 if [ ! -f "$APPIMAGE_FILE" ]; then
     echo "Error: File '$APPIMAGE_FILE' not found!"

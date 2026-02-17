@@ -19,20 +19,31 @@ if [ ! -f "$APPIMAGE_FILE" ]; then
     exit 1
 fi
 
-# Check if file is executable
-if [ ! -x "$APPIMAGE_FILE" ]; then
-    echo "Error: File '$APPIMAGE_FILE' is not executable!"
+echo "Analyzing AppImage: $APPIMAGE_FILE"
+
+# Find all 'hsqs' (SquashFS magic) offsets in the file
+OFFSETS=$(grep -aob 'hsqs' "$APPIMAGE_FILE" | cut -d: -f1)
+
+if [ -z "$OFFSETS" ]; then
+    echo "Error: No SquashFS magic bytes found. Make sure the file is a valid AppImage."
     exit 1
 fi
 
-echo "Analyzing AppImage: $APPIMAGE_FILE"
-
-# Get the offset of the SquashFS filesystem
-OFFSET=$("$APPIMAGE_FILE" --appimage-offset)
+# Validate each offset (starting from last) to find a real SquashFS v4 superblock
+OFFSET=""
+TMPCHUNK=$(mktemp)
+for candidate in $(echo "$OFFSETS" | sort -rn); do
+    dd if="$APPIMAGE_FILE" bs=1 skip="$candidate" count=512 of="$TMPCHUNK" 2>/dev/null
+    if file "$TMPCHUNK" | grep -qi 'squashfs.*version 4'; then
+        OFFSET="$candidate"
+        break
+    fi
+done
+rm -f "$TMPCHUNK"
 
 # Check if offset was obtained successfully
 if [ -z "$OFFSET" ]; then
-    echo "Error: Unable to determine SquashFS offset. Make sure the file is a valid AppImage."
+    echo "Error: No valid SquashFS v4 superblock found. Make sure the file is a valid AppImage."
     exit 1
 fi
 

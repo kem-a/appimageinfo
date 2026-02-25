@@ -52,3 +52,43 @@ echo "----------------------------------------"
 
 # Use unsquashfs to show filesystem info, redirecting stderr to stdout and filtering output
 unsquashfs -o "$OFFSET" -stat "$APPIMAGE_FILE" 2>&1 | grep -v "Parallel unsquashfs"
+
+# Extract update information from .upd_info ELF section
+echo "----------------------------------------"
+SECTION_LINE=$(objdump -h "$APPIMAGE_FILE" 2>/dev/null | grep '\.upd_info')
+if [ -n "$SECTION_LINE" ]; then
+    UPD_SIZE=$((16#$(echo "$SECTION_LINE" | awk '{print $3}')))
+    UPD_OFFSET=$((16#$(echo "$SECTION_LINE" | awk '{print $6}')))
+
+    if [ "$UPD_SIZE" -gt 0 ] && [ "$UPD_OFFSET" -gt 0 ]; then
+        UPD_INFO=$(dd if="$APPIMAGE_FILE" bs=1 skip="$UPD_OFFSET" count="$UPD_SIZE" 2>/dev/null | tr -d '\0')
+
+        if [ -n "$UPD_INFO" ]; then
+            UPDATE_TYPE=$(echo "$UPD_INFO" | cut -d'|' -f1)
+            case "$UPDATE_TYPE" in
+                zsync)
+                    echo "Update type: zsync"
+                    echo "Update URL: $(echo "$UPD_INFO" | cut -d'|' -f2-)"
+                    ;;
+                gh-releases-zsync)
+                    echo "Update type: gh-releases-zsync"
+                    echo "Update URL: $(echo "$UPD_INFO" | cut -d'|' -f2-)"
+                    ;;
+                bintray-zsync)
+                    echo "Update type: bintray-zsync"
+                    echo "Update URL: $(echo "$UPD_INFO" | cut -d'|' -f2-)"
+                    ;;
+                *)
+                    echo "Update type: unknown"
+                    echo "Update info: $UPD_INFO"
+                    ;;
+            esac
+        else
+            echo "zsync update info not found (section is empty)"
+        fi
+    else
+        echo "zsync update info not found (invalid section)"
+    fi
+else
+    echo "zsync update info not found (no .upd_info section)"
+fi

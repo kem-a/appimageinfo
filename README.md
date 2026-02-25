@@ -1,7 +1,6 @@
 # AppImage Info
 
-A simple Bash script to analyze AppImage files and extract filesystem information.
-
+A simple Bash script to analyze AppImage files and extract filesystem and update information.
 
 ## Usage
 
@@ -10,7 +9,6 @@ To use this script, you need to provide an AppImage file as an argument. AppImag
 ```sh
 ./appimageinfo <appimage-file>
 ```
-
 
 ## Output Example
 
@@ -39,11 +37,25 @@ Number of xattr ids 0
 
 ```
 
+If zsync update information is embedded in the AppImage:
+
+```sh
+----------------------------------------
+Update type: gh-releases-zsync
+Update URL: probonopd|AppImageKit|continuous|appimagetool-x86_64.AppImage.zsync
+```
+
+If no update information is found:
+
+```sh
+----------------------------------------
+zsync update info not found (no .upd_info section)
+```
 
 ## Dependencies
 
 * unsquashfs (squashfs-tools)
-
+* objdump (binutils)
 
 ## Licence
 

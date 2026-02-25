@@ -76,7 +76,7 @@ elif [ "$FS_TYPE" = "dwarfs" ]; then
         echo "Error: dwarfsck not found. Install dwarfs or place dwarfsck next to this script."
         exit 1
     fi
-    "$DWARFSCK" -i "$APPIMAGE_FILE" -O auto 2>&1
+    "$DWARFSCK" -i "$APPIMAGE_FILE" -O auto 2>&1 | sed '/^metadata memory usage:$/,$ d'
 fi
 
 # Extract update information from .upd_info ELF section

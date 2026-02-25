@@ -21,37 +21,63 @@ fi
 
 echo "Analyzing AppImage: $APPIMAGE_FILE"
 
-# Find all 'hsqs' (SquashFS magic) offsets in the file
-OFFSETS=$(grep -aob 'hsqs' "$APPIMAGE_FILE" | cut -d: -f1)
+# Resolve the directory where this script lives (for bundled tools)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [ -z "$OFFSETS" ]; then
-    echo "Error: No SquashFS magic bytes found. Make sure the file is a valid AppImage."
-    exit 1
-fi
-
-# Validate each offset (starting from last) to find a real SquashFS v4 superblock
+# Detect filesystem type: SquashFS ('hsqs') or DwarFS ('DWARFS')
+FS_TYPE=""
 OFFSET=""
-TMPCHUNK=$(mktemp)
-for candidate in $(echo "$OFFSETS" | sort -rn); do
-    dd if="$APPIMAGE_FILE" bs=1 skip="$candidate" count=512 of="$TMPCHUNK" 2>/dev/null
-    if file "$TMPCHUNK" | grep -qi 'squashfs.*version 4'; then
-        OFFSET="$candidate"
-        break
-    fi
-done
-rm -f "$TMPCHUNK"
 
-# Check if offset was obtained successfully
-if [ -z "$OFFSET" ]; then
-    echo "Error: No valid SquashFS v4 superblock found. Make sure the file is a valid AppImage."
+# Check for SquashFS magic bytes
+SQFS_OFFSETS=$(grep -aob 'hsqs' "$APPIMAGE_FILE" 2>/dev/null | cut -d: -f1)
+if [ -n "$SQFS_OFFSETS" ]; then
+    TMPCHUNK=$(mktemp)
+    for candidate in $(echo "$SQFS_OFFSETS" | sort -rn); do
+        dd if="$APPIMAGE_FILE" bs=1 skip="$candidate" count=512 of="$TMPCHUNK" 2>/dev/null
+        if file "$TMPCHUNK" | grep -qi 'squashfs.*version 4'; then
+            OFFSET="$candidate"
+            FS_TYPE="squashfs"
+            break
+        fi
+    done
+    rm -f "$TMPCHUNK"
+fi
+
+# If no SquashFS found, check for DwarFS
+if [ -z "$FS_TYPE" ]; then
+    if grep -aq 'DWARFS' "$APPIMAGE_FILE" 2>/dev/null; then
+        FS_TYPE="dwarfs"
+    fi
+fi
+
+# Check if any filesystem was found
+if [ -z "$FS_TYPE" ]; then
+    echo "Error: No valid SquashFS or DwarFS filesystem found. Make sure the file is a valid AppImage."
     exit 1
 fi
 
-echo "SquashFS offset: $OFFSET"
+echo "Filesystem type: $FS_TYPE"
+if [ -n "$OFFSET" ]; then
+    echo "Filesystem offset: $OFFSET"
+fi
 echo "----------------------------------------"
 
-# Use unsquashfs to show filesystem info, redirecting stderr to stdout and filtering output
-unsquashfs -o "$OFFSET" -stat "$APPIMAGE_FILE" 2>&1 | grep -v "Parallel unsquashfs"
+if [ "$FS_TYPE" = "squashfs" ]; then
+    # Use unsquashfs to show filesystem info
+    unsquashfs -o "$OFFSET" -stat "$APPIMAGE_FILE" 2>&1 | grep -v "Parallel unsquashfs"
+elif [ "$FS_TYPE" = "dwarfs" ]; then
+    # Use dwarfsck to show filesystem info (auto-detects offset)
+    DWARFSCK=""
+    if command -v dwarfsck &>/dev/null; then
+        DWARFSCK="dwarfsck"
+    elif [ -x "$SCRIPT_DIR/dwarfsck" ]; then
+        DWARFSCK="$SCRIPT_DIR/dwarfsck"
+    else
+        echo "Error: dwarfsck not found. Install dwarfs or place dwarfsck next to this script."
+        exit 1
+    fi
+    "$DWARFSCK" -i "$APPIMAGE_FILE" -O auto 2>&1
+fi
 
 # Extract update information from .upd_info ELF section
 echo "----------------------------------------"

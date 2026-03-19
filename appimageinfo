@@ -19,102 +19,167 @@ if [ ! -f "$APPIMAGE_FILE" ]; then
     exit 1
 fi
 
-echo "Analyzing AppImage: $APPIMAGE_FILE"
-
 # Resolve the directory where this script lives (for bundled tools)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Detect filesystem type: SquashFS ('hsqs') or DwarFS ('DWARFS')
-FS_TYPE=""
-OFFSET=""
+analyze_zsync() {
+    local zsync_file="$1"
+    local header
 
-# Check for SquashFS magic bytes
-SQFS_OFFSETS=$(grep -aob 'hsqs' "$APPIMAGE_FILE" 2>/dev/null | cut -d: -f1)
-if [ -n "$SQFS_OFFSETS" ]; then
-    TMPCHUNK=$(mktemp)
-    for candidate in $(echo "$SQFS_OFFSETS" | sort -rn); do
-        dd if="$APPIMAGE_FILE" bs=1 skip="$candidate" count=512 of="$TMPCHUNK" 2>/dev/null
-        if file "$TMPCHUNK" | grep -qi 'squashfs.*version 4'; then
-            OFFSET="$candidate"
-            FS_TYPE="squashfs"
-            break
-        fi
-    done
-    rm -f "$TMPCHUNK"
-fi
-
-# If no SquashFS found, check for DwarFS
-if [ -z "$FS_TYPE" ]; then
-    if grep -aq 'DWARFS' "$APPIMAGE_FILE" 2>/dev/null; then
-        FS_TYPE="dwarfs"
-    fi
-fi
-
-# Check if any filesystem was found
-if [ -z "$FS_TYPE" ]; then
-    echo "Error: No valid SquashFS or DwarFS filesystem found. Make sure the file is a valid AppImage."
-    exit 1
-fi
-
-echo "Filesystem type: $FS_TYPE"
-if [ -n "$OFFSET" ]; then
-    echo "Filesystem offset: $OFFSET"
-fi
-echo "----------------------------------------"
-
-if [ "$FS_TYPE" = "squashfs" ]; then
-    # Use unsquashfs to show filesystem info
-    unsquashfs -o "$OFFSET" -stat "$APPIMAGE_FILE" 2>&1 | grep -v "Parallel unsquashfs"
-elif [ "$FS_TYPE" = "dwarfs" ]; then
-    # Use dwarfsck to show filesystem info (auto-detects offset)
-    DWARFSCK=""
-    if command -v dwarfsck &>/dev/null; then
-        DWARFSCK="dwarfsck"
-    elif [ -x "$SCRIPT_DIR/dwarfsck" ]; then
-        DWARFSCK="$SCRIPT_DIR/dwarfsck"
-    else
-        echo "Error: dwarfsck not found. Install dwarfs or place dwarfsck next to this script."
+    header=$(LC_ALL=C sed -n '1,/^$/p' "$zsync_file")
+    if ! printf '%s\n' "$header" | grep -q '^zsync:'; then
+        echo "Error: File '$zsync_file' does not appear to be a valid zsync metadata file."
         exit 1
     fi
-    "$DWARFSCK" -i "$APPIMAGE_FILE" -O auto 2>&1 | sed '/^metadata memory usage:$/,$ d'
-fi
 
-# Extract update information from .upd_info ELF section
-echo "----------------------------------------"
-SECTION_LINE=$(objdump -h "$APPIMAGE_FILE" 2>/dev/null | grep '\.upd_info')
-if [ -n "$SECTION_LINE" ]; then
-    UPD_SIZE=$((16#$(echo "$SECTION_LINE" | awk '{print $3}')))
-    UPD_OFFSET=$((16#$(echo "$SECTION_LINE" | awk '{print $6}')))
+    echo "Analyzing zsync: $zsync_file"
+    printf '%s\n' "$header" | while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        case "$line" in
+            zsync:*)
+                echo "Zsync version: ${line#zsync: }"
+                ;;
+            Filename:*)
+                echo "Target filename: ${line#Filename: }"
+                ;;
+            MTime:*)
+                echo "Target mtime: ${line#MTime: }"
+                ;;
+            Blocksize:*)
+                echo "Block size: ${line#Blocksize: }"
+                ;;
+            Length:*)
+                echo "Target length: ${line#Length: }"
+                ;;
+            Hash-Lengths:*)
+                echo "Hash lengths: ${line#Hash-Lengths: }"
+                ;;
+            URL:*)
+                echo "Target URL: ${line#URL: }"
+                ;;
+            SHA-1:*)
+                echo "SHA-1: ${line#SHA-1: }"
+                ;;
+            *)
+                echo "$line"
+                ;;
+        esac
+    done
+}
 
-    if [ "$UPD_SIZE" -gt 0 ] && [ "$UPD_OFFSET" -gt 0 ]; then
-        UPD_INFO=$(dd if="$APPIMAGE_FILE" bs=1 skip="$UPD_OFFSET" count="$UPD_SIZE" 2>/dev/null | tr -d '\0')
+analyze_appimage() {
+    local appimage_file="$1"
+    local fs_type=""
+    local offset=""
+    local sqfs_offsets
+    local tmpchunk
+    local candidate
+    local dwarfsck_bin
+    local section_line
+    local upd_size
+    local upd_offset
+    local upd_info
+    local update_type
 
-        if [ -n "$UPD_INFO" ]; then
-            UPDATE_TYPE=$(echo "$UPD_INFO" | cut -d'|' -f1)
-            case "$UPDATE_TYPE" in
-                zsync)
-                    echo "Update type: zsync"
-                    echo "Update URL: $(echo "$UPD_INFO" | cut -d'|' -f2-)"
-                    ;;
-                gh-releases-zsync)
-                    echo "Update type: gh-releases-zsync"
-                    echo "Update URL: $(echo "$UPD_INFO" | cut -d'|' -f2-)"
-                    ;;
-                bintray-zsync)
-                    echo "Update type: bintray-zsync"
-                    echo "Update URL: $(echo "$UPD_INFO" | cut -d'|' -f2-)"
-                    ;;
-                *)
-                    echo "Update type: unknown"
-                    echo "Update info: $UPD_INFO"
-                    ;;
-            esac
+    echo "Analyzing AppImage: $appimage_file"
+
+    # Detect filesystem type: SquashFS ('hsqs') or DwarFS ('DWARFS')
+    sqfs_offsets=$(grep -aob 'hsqs' "$appimage_file" 2>/dev/null | cut -d: -f1)
+    if [ -n "$sqfs_offsets" ]; then
+        tmpchunk=$(mktemp)
+        for candidate in $(echo "$sqfs_offsets" | sort -rn); do
+            dd if="$appimage_file" bs=1 skip="$candidate" count=512 of="$tmpchunk" 2>/dev/null
+            if file "$tmpchunk" | grep -qi 'squashfs.*version 4'; then
+                offset="$candidate"
+                fs_type="squashfs"
+                break
+            fi
+        done
+        rm -f "$tmpchunk"
+    fi
+
+    # If no SquashFS found, check for DwarFS
+    if [ -z "$fs_type" ]; then
+        if grep -aq 'DWARFS' "$appimage_file" 2>/dev/null; then
+            fs_type="dwarfs"
+        fi
+    fi
+
+    # Check if any filesystem was found
+    if [ -z "$fs_type" ]; then
+        echo "Error: No valid SquashFS or DwarFS filesystem found. Make sure the file is a valid AppImage."
+        exit 1
+    fi
+
+    echo "Filesystem type: $fs_type"
+    if [ -n "$offset" ]; then
+        echo "Filesystem offset: $offset"
+    fi
+    echo "----------------------------------------"
+
+    if [ "$fs_type" = "squashfs" ]; then
+        # Use unsquashfs to show filesystem info
+        unsquashfs -o "$offset" -stat "$appimage_file" 2>&1 | grep -v "Parallel unsquashfs"
+    elif [ "$fs_type" = "dwarfs" ]; then
+        # Use dwarfsck to show filesystem info (auto-detects offset)
+        dwarfsck_bin=""
+        if command -v dwarfsck &>/dev/null; then
+            dwarfsck_bin="dwarfsck"
+        elif [ -x "$SCRIPT_DIR/dwarfsck" ]; then
+            dwarfsck_bin="$SCRIPT_DIR/dwarfsck"
         else
-            echo "zsync update info not found (section is empty)"
+            echo "Error: dwarfsck not found. Install dwarfs or place dwarfsck next to this script."
+            exit 1
+        fi
+        "$dwarfsck_bin" -i "$appimage_file" -O auto 2>&1 | sed '/^metadata memory usage:$/,$ d'
+    fi
+
+    # Extract update information from .upd_info ELF section
+    echo "----------------------------------------"
+    section_line=$(objdump -h "$appimage_file" 2>/dev/null | grep '\.upd_info')
+    if [ -n "$section_line" ]; then
+        upd_size=$((16#$(echo "$section_line" | awk '{print $3}')))
+        upd_offset=$((16#$(echo "$section_line" | awk '{print $6}')))
+
+        if [ "$upd_size" -gt 0 ] && [ "$upd_offset" -gt 0 ]; then
+            upd_info=$(dd if="$appimage_file" bs=1 skip="$upd_offset" count="$upd_size" 2>/dev/null | tr -d '\0')
+
+            if [ -n "$upd_info" ]; then
+                update_type=$(echo "$upd_info" | cut -d'|' -f1)
+                case "$update_type" in
+                    zsync)
+                        echo "Update type: zsync"
+                        echo "Update URL: $(echo "$upd_info" | cut -d'|' -f2-)"
+                        ;;
+                    gh-releases-zsync)
+                        echo "Update type: gh-releases-zsync"
+                        echo "Update URL: $(echo "$upd_info" | cut -d'|' -f2-)"
+                        ;;
+                    bintray-zsync)
+                        echo "Update type: bintray-zsync"
+                        echo "Update URL: $(echo "$upd_info" | cut -d'|' -f2-)"
+                        ;;
+                    *)
+                        echo "Update type: unknown"
+                        echo "Update info: $upd_info"
+                        ;;
+                esac
+            else
+                echo "zsync update info not found (section is empty)"
+            fi
+        else
+            echo "zsync update info not found (invalid section)"
         fi
     else
-        echo "zsync update info not found (invalid section)"
+        echo "zsync update info not found (no .upd_info section)"
     fi
-else
-    echo "zsync update info not found (no .upd_info section)"
-fi
+}
+
+case "${APPIMAGE_FILE,,}" in
+    *.zsync)
+        analyze_zsync "$APPIMAGE_FILE"
+        ;;
+    *)
+        analyze_appimage "$APPIMAGE_FILE"
+        ;;
+esac
